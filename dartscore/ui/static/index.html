@@ -37,6 +37,18 @@
   .checkout { color: var(--good); }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
   .side { display: flex; flex-direction: column; gap: 20px; }
+  .dart, .chip { cursor: pointer; }
+  .dart:hover, .chip:hover { border-color: var(--text); }
+  .dart.empty { color: var(--muted); }
+  .sel { outline: 2px solid var(--accent); outline-offset: 2px; background: #3a3320; }
+  .editbar { border: 1px solid var(--accent); background: #2a2616; border-radius: 10px; padding: 12px; margin: 12px 0; }
+  .editbar .row { margin-top: 8px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  svg.editing { outline: 2px dashed var(--accent); outline-offset: 6px; border-radius: 50%; }
+  #visits table td { padding: 4px 6px; }
+  .chip { display: inline-block; min-width: 46px; padding: 2px 6px; margin: 1px; border: 1px solid var(--line); border-radius: 6px; text-align: center; }
+  .chip.empty { color: var(--muted); border-style: dashed; }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
 </style>
 </head>
 <body>
@@ -63,6 +75,18 @@
       <h2 id="title">Game</h2>
       <div id="scoreboard"></div>
       <div class="darts" id="darts"></div>
+      <div class="editbar" id="editbar" hidden>
+        <b id="edit-title"></b>
+        <div class="muted">Click the board where the dart really landed, or type the correct score.</div>
+        <div class="row">
+          <form id="editform" style="display:flex;gap:6px">
+            <input name="label" placeholder="T20, D16, 25, bull, miss" size="18" aria-label="Correct score">
+            <button>Save</button>
+          </form>
+          <button id="edit-del" class="danger">Delete dart</button>
+          <button id="edit-cancel">Cancel</button>
+        </div>
+      </div>
       <div class="msg" id="msg"></div>
       <div id="checkout" class="checkout"></div>
       <div class="row">
@@ -75,9 +99,13 @@
       </div>
       <div id="feed"></div>
     </div>
+    <div class="panel" id="visits">
+      <h2>Visits: click a dart to correct it</h2>
+      <div id="visit-list"></div>
+    </div>
     <div class="panel" id="camera" hidden>
       <h2>Camera</h2>
-      <img src="/video.mjpg" alt="camera feed with detected darts">
+      <img id="feed-img" alt="camera feed with detected darts">
     </div>
   </section>
 </main>
@@ -85,6 +113,8 @@
 const NS = "http://www.w3.org/2000/svg";
 const svg = document.getElementById("board");
 let G = null;
+let sel = null;     // dart being corrected: {visit, dart, player, label}
+let last = null;    // last state from the server
 
 function pt(r, a) { const t = a * Math.PI / 180; return [r * Math.sin(t), -r * Math.cos(t)]; }
 function sector(r0, r1, a0, a1, fill) {
@@ -152,11 +182,19 @@ function render(s) {
     sb.innerHTML = `<table><tr><th>Player</th><th>Left</th><th>Avg</th></tr>` +
       s.players.map((p, i) => `<tr class="${i === s.current ? "current" : ""}"><td>${esc(p)}</td><td class="big">${s.scores[p]}</td><td>${s.averages[p]}</td></tr>`).join("") + "</table>";
   }
+  last = s;
+  const cur = s.visits[s.visits.length - 1];
   const darts = document.getElementById("darts"); darts.innerHTML = "";
   for (let i = 0; i < 3; i++) {
     const t = s.turn[i], el = document.createElement("div");
-    el.className = "dart" + (t ? " filled" : ""); el.textContent = t ? t.label : "–"; darts.appendChild(el);
+    el.className = "dart" + (t ? " filled" : " empty") + (isSel(cur.index, i) ? " sel" : "");
+    el.textContent = t ? t.label : (i === s.turn.length ? "+ add" : "–");
+    el.title = t ? "Click to correct this dart" : "Click to add a dart the camera missed";
+    if (t || i === s.turn.length) el.onclick = () => select(cur.index, i, cur.player, t ? t.label : null);
+    darts.appendChild(el);
   }
+  renderVisits(s);
+  renderEditBar();
   const msg = document.getElementById("msg");
   msg.textContent = s.winner ? `🏆 ${s.message}` : (s.message || (s.turn_over ? "Visit complete: remove darts" : `${s.players[s.current]} to throw`));
   msg.className = "msg" + (s.message.startsWith("BUST") ? " bust" : "");
@@ -170,10 +208,55 @@ function render(s) {
     g.appendChild(c);
   });
 }
+function isSel(v, d) { return sel && sel.visit === v && sel.dart === d; }
+function select(visit, dart, player, label) {
+  sel = { visit, dart, player, label };
+  if (last) render(last);
+  document.querySelector("#editform input").focus();
+}
+function clearSel() { sel = null; if (last) render(last); }
+function renderEditBar() {
+  const bar = document.getElementById("editbar");
+  bar.hidden = !sel;
+  svg.classList.toggle("editing", !!sel);
+  if (!sel) return;
+  document.getElementById("edit-title").textContent = sel.label
+    ? `Correcting ${sel.player}, visit ${sel.visit + 1}, dart ${sel.dart + 1} (currently ${sel.label})`
+    : `Adding a missed dart for ${sel.player}, visit ${sel.visit + 1}, dart ${sel.dart + 1}`;
+  document.getElementById("edit-del").hidden = !sel.label;
+}
+function renderVisits(s) {
+  const rows = s.visits.slice().reverse().map(v => {
+    const chips = [0, 1, 2].map(i => {
+      const lbl = v.darts[i];
+      if (lbl !== undefined) return `<span class="chip${isSel(v.index, i) ? " sel" : ""}" data-v="${v.index}" data-d="${i}" data-p="${esc(v.player)}" data-l="${lbl}" title="Correct this dart">${lbl}</span>`;
+      if (i === v.darts.length) return `<span class="chip empty${isSel(v.index, i) ? " sel" : ""}" data-v="${v.index}" data-d="${i}" data-p="${esc(v.player)}" title="Add a missed dart">+</span>`;
+      return "";
+    }).join("");
+    return `<tr><td>${v.index + 1}</td><td>${esc(v.player)}</td><td>${chips}</td><td>${v.points}</td></tr>`;
+  }).join("");
+  const box = document.getElementById("visit-list");
+  box.innerHTML = `<table><tr><th>#</th><th>Player</th><th>Darts</th><th>Pts</th></tr>${rows}</table>`;
+  box.querySelectorAll(".chip").forEach(c => c.onclick = () =>
+    select(+c.dataset.v, +c.dataset.d, c.dataset.p, c.dataset.l || null));
+}
+async function edit(body) {
+  const target = sel; sel = null;
+  if (last) render(last);   // close the editor straight away
+  await api("/api/edit", { visit: target.visit, dart: target.dart, ...body });
+}
+
 function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
-svg.addEventListener("click", ev => api("/api/impact", boardXY(ev)));
+svg.addEventListener("click", ev => sel ? edit(boardXY(ev)) : api("/api/impact", boardXY(ev)));
 svg.addEventListener("mousemove", ev => { const p = boardXY(ev); document.getElementById("hover").textContent = `${label(p.x, p.y)}   (x=${p.x.toFixed(1)} mm, y=${p.y.toFixed(1)} mm)`; });
+document.getElementById("editform").onsubmit = ev => {
+  ev.preventDefault(); const f = ev.target;
+  if (f.label.value.trim()) edit({ label: f.label.value }); f.label.value = "";
+};
+document.getElementById("edit-del").onclick = () => edit({ delete: true });
+document.getElementById("edit-cancel").onclick = clearSel;
+document.addEventListener("keydown", ev => { if (ev.key === "Escape") clearSel(); });
 document.getElementById("undo").onclick = () => api("/api/undo", {});
 document.getElementById("next").onclick = () => api("/api/next", {});
 document.getElementById("manual").onsubmit = ev => { ev.preventDefault(); const f = ev.target; api("/api/throw", { label: f.label.value }); f.label.value = ""; };
@@ -185,7 +268,10 @@ document.getElementById("newgame").onsubmit = ev => {
 (async () => {
   G = await (await fetch("/api/geometry")).json();
   drawBoard();
-  if (G.camera) document.getElementById("camera").hidden = false;
+  if (G.camera) {
+    document.getElementById("camera").hidden = false;
+    document.getElementById("feed-img").src = "/video.mjpg";
+  }
   await api("/api/state");
   setInterval(() => api("/api/state"), 700);
 })();

@@ -12,7 +12,7 @@ sensor board.
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m pytest            # 73 tests, ~20 s
+.venv\Scripts\python -m pytest            # 80 tests, ~20 s
 ```
 
 **See the whole thing running (no hardware):**
@@ -35,6 +35,24 @@ detected hits.
 
 You can also type throws (`T20`, `D16`, `25`, `bull`, `miss`), undo, and start
 501/301/701/Cricket games for any number of players.
+
+### Turns and correcting wrong detections
+
+Each visit is 3 darts. In camera mode the visit ends when the camera sees the
+darts being pulled out. In manual mode it ends when you click **Next player**
+or enter a 4th dart. After a bust, the rest of the visit's darts are recorded
+but don't count, and they don't spill over to the next player.
+
+When the camera gets a dart wrong, click it: in the current visit's three boxes
+or anywhere in the **Visits** history. Then:
+
+* **click the board** where the dart really landed, or **type** the score (`T20`, `25`, `miss`) and Save;
+* **Delete dart** for a false detection;
+* click **+ add** / **+** on an empty slot to add a dart the camera missed (e.g. a bounce-out).
+
+Fixes can go back any number of visits. The game keeps a list of every dart and
+replays it, so busts, checkouts, averages and turn order all update. Undo
+reverses a correction too.
 
 ## Architecture
 

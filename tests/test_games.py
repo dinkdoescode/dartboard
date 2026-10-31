@@ -1,3 +1,5 @@
+import pytest
+
 from dartscore.game import Cricket, X01, checkout
 from dartscore.scoring import parse_throw as P
 
@@ -123,3 +125,73 @@ def test_cricket_bull_and_win():
     assert g.winner is None
     g.throw(P("25"))
     assert g.winner == "A"
+
+
+# -- corrections ----------------------------------------------------------------
+def test_edit_dart_in_current_visit():
+    g = X01(["A", "B"])
+    g.throw(P("S20"))
+    g.throw(P("S1"))
+    g.edit(-1, 1, P("T20"))                 # camera said S1, it was T20
+    assert [t.label for t in g.turn] == ["S20", "T20"]
+    assert g.scores["A"] == 501 - 80
+
+
+def test_edit_past_visit_rescores_everything_after_it():
+    g = X01(["A", "B"], start=101)
+    visit(g, "T20", "S1", "S1")             # A: 101 -> 39
+    visit(g, "S5", "S5", "S5")              # B: 101 -> 86
+    g.throw(P("D19"))                       # A checks out 39? no: 39-38 = 1 -> bust
+    assert g.scores["A"] == 39 and g.busted
+    g.edit(0, 1, P("S2"))                   # A's first visit had S2, not S1: 101 -> 38
+    assert g.scores["A"] == 0 and g.winner == "A"   # so D19 was the winning dart
+    assert g.scores["B"] == 86
+
+
+def test_delete_false_detection_and_add_missed_dart():
+    g = X01(["A", "B"])
+    g.throw(P("T20"))
+    g.throw(P("S5"))                        # false detection
+    g.edit(-1, 1, None)
+    assert [t.label for t in g.turn] == ["T20"]
+    g.edit(-1, 1, P("T19"))                 # dart the camera missed
+    assert g.scores["A"] == 501 - 117
+    g.throw(P("S1"))
+    assert g.turn_over
+
+
+def test_add_missed_dart_to_past_visit():
+    g = X01(["A", "B"])
+    visit(g, "T20", "T20")                  # camera missed the third dart
+    visit(g, "S1")
+    g.edit(0, 2, P("T20"))
+    assert g.scores["A"] == 321
+    assert g.scores["B"] == 500 and g.current == 0   # later visits replayed unchanged
+    with pytest.raises(ValueError):
+        g.edit(0, 3, P("S1"))               # a visit holds at most 3 darts
+
+
+def test_edit_can_be_undone():
+    g = X01(["A"])
+    g.throw(P("S1"))
+    g.edit(-1, 0, P("T20"))
+    assert g.scores["A"] == 441
+    g.undo()
+    assert g.scores["A"] == 500
+
+
+def test_darts_after_bust_are_recorded_but_ignored():
+    g = X01(["A", "B"], start=50)
+    g.throw(P("T20"))                       # bust
+    g.throw(P("S10"))                       # player throws the rest anyway
+    assert g.scores["A"] == 50
+    assert g.current == 0                   # still A's visit, not credited to B
+    g.edit(-1, 0, P("S20"))                 # it was S20, not T20: no bust
+    assert g.scores["A"] == 20 and not g.busted
+
+
+def test_cricket_edit():
+    g = Cricket(["A", "B"])
+    g.throw(P("S20"))
+    g.edit(-1, 0, P("T20"))
+    assert g.marks["A"][20] == 3

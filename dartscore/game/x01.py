@@ -11,6 +11,7 @@ from .base import Game
 class X01(Game):
     def __init__(self, players: list[str], start: int = 501, double_out: bool = True, double_in: bool = False):
         super().__init__(players)
+        self._init.update(start=start, double_out=double_out, double_in=double_in)
         self.start = start
         self.name = str(start)
         self.double_out = double_out
@@ -40,7 +41,7 @@ class X01(Game):
             self.scores[p] = self.turn_start
             self.points_scored[p] -= sum(x.points for x in self.turn[:-1])
             self.message = f"BUST! {p} stays on {self.turn_start}"
-            self.turn_over = True
+            self.busted = True
             return
         self.scores[p] = remaining
         self.points_scored[p] += t.points

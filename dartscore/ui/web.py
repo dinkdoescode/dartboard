@@ -46,6 +46,23 @@ def create_app(session: Session, camera: CameraImpactSource | None = None) -> Fl
         session.throw(t, "keyboard")
         return jsonify(session.state())
 
+    @app.post("/api/edit")
+    def edit():
+        """Correct a dart. Body: {visit, dart} plus one of
+        {label: "T20"}, {x, y} (board mm), or {delete: true}."""
+        d = request.get_json(force=True)
+        try:
+            if d.get("delete"):
+                new = None
+            elif "label" in d:
+                new = parse_throw(d["label"])
+            else:
+                new = score_xy(float(d["x"]), float(d["y"]))
+            session.edit(int(d["visit"]), int(d["dart"]), new)
+        except (ValueError, KeyError, IndexError) as e:
+            return jsonify({"error": str(e) or "invalid edit"}), 400
+        return jsonify(session.state())
+
     @app.get("/api/score")
     def score():
         t = score_xy(float(request.args["x"]), float(request.args["y"]))
