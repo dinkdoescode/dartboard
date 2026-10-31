@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dart Scorer</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --line: #2c3038; --text: #e8e9ec; --muted: #8b909a;
+    --accent: #f5c542; --good: #4cc38a; --bad: #ef5b5b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0 12px 0 0; }
+  header form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input, select, button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font: inherit; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  main { display: grid; grid-template-columns: minmax(300px, 640px) minmax(280px, 1fr); gap: 20px; padding: 20px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  svg { width: 100%; height: auto; display: block; cursor: crosshair; user-select: none; }
+  #hover { color: var(--muted); min-height: 1.4em; text-align: center; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 8px; text-align: center; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  tr.current td { color: var(--accent); font-weight: 600; }
+  .big { font-size: 34px; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .darts { display: flex; gap: 8px; margin: 12px 0; }
+  .dart { flex: 1; text-align: center; padding: 10px 0; border: 1px dashed var(--line); border-radius: 8px; font-size: 20px; font-weight: 600; }
+  .dart.filled { border-style: solid; border-color: var(--accent); }
+  .msg { min-height: 1.5em; font-weight: 600; color: var(--accent); }
+  .msg.bust { color: var(--bad); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  #feed { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); max-height: 180px; overflow: auto; margin-top: 12px; white-space: pre-wrap; }
+  #camera img { width: 100%; border-radius: 8px; margin-top: 8px; }
+  .checkout { color: var(--good); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .side { display: flex; flex-direction: column; gap: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎯 Dart Scorer</h1>
+  <form id="newgame">
+    <select name="game">
+      <option value="501">501</option><option value="301">301</option>
+      <option value="701">701</option><option value="cricket">Cricket</option>
+    </select>
+    <input name="players" value="Player 1, Player 2" size="22" aria-label="Players (comma separated)">
+    <label><input type="checkbox" name="double_out" checked> Double out</label>
+    <button>New game</button>
+  </form>
+</header>
+<main>
+  <section class="panel">
+    <h2>Board: click where the dart landed</h2>
+    <svg id="board" viewBox="-232 -232 464 464"></svg>
+    <div id="hover"></div>
+  </section>
+  <section class="side">
+    <div class="panel">
+      <h2 id="title">Game</h2>
+      <div id="scoreboard"></div>
+      <div class="darts" id="darts"></div>
+      <div class="msg" id="msg"></div>
+      <div id="checkout" class="checkout"></div>
+      <div class="row">
+        <button id="undo">Undo</button>
+        <button id="next">Next player / darts removed</button>
+        <form id="manual" style="display:flex;gap:6px">
+          <input name="label" placeholder="T20, D16, 25, bull, miss" size="18" aria-label="Manual entry">
+          <button>Add</button>
+        </form>
+      </div>
+      <div id="feed"></div>
+    </div>
+    <div class="panel" id="camera" hidden>
+      <h2>Camera</h2>
+      <img src="/video.mjpg" alt="camera feed with detected darts">
+    </div>
+  </section>
+</main>
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("board");
+let G = null;
+
+function pt(r, a) { const t = a * Math.PI / 180; return [r * Math.sin(t), -r * Math.cos(t)]; }
+function sector(r0, r1, a0, a1, fill) {
+  const [x0, y0] = pt(r1, a0), [x1, y1] = pt(r1, a1), [x2, y2] = pt(r0, a1), [x3, y3] = pt(r0, a0);
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", `M${x0} ${y0} A${r1} ${r1} 0 0 1 ${x1} ${y1} L${x2} ${y2} A${r0} ${r0} 0 0 0 ${x3} ${y3}Z`);
+  p.setAttribute("fill", fill); p.setAttribute("stroke", "#9aa0a6"); p.setAttribute("stroke-width", "0.6");
+  svg.appendChild(p);
+}
+function circle(r, fill) {
+  const c = document.createElementNS(NS, "circle");
+  c.setAttribute("r", r); c.setAttribute("fill", fill); c.setAttribute("stroke", "#9aa0a6"); c.setAttribute("stroke-width", "0.6");
+  svg.appendChild(c);
+}
+function drawBoard() {
+  const d = G.dims;
+  circle(d.board_radius, "#111");
+  G.order.forEach((n, i) => {
+    const a0 = i * 18 - 9, a1 = a0 + 18, even = i % 2 === 0;
+    const single = even ? "#1e1e1e" : "#e9dcb8", ring = even ? "#c8302c" : "#1f8a3c";
+    sector(d.outer_bull, d.triple_inner, a0, a1, single);
+    sector(d.triple_inner, d.triple_outer, a0, a1, ring);
+    sector(d.triple_outer, d.double_inner, a0, a1, single);
+    sector(d.double_inner, d.double_outer, a0, a1, ring);
+    const [x, y] = pt(196, i * 18);
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", x); t.setAttribute("y", y + 7); t.setAttribute("fill", "#eee");
+    t.setAttribute("font-size", "20"); t.setAttribute("text-anchor", "middle"); t.setAttribute("font-weight", "600");
+    t.textContent = n; svg.appendChild(t);
+  });
+  circle(d.outer_bull, "#1f8a3c");
+  circle(d.inner_bull, "#c8302c");
+  const g = document.createElementNS(NS, "g"); g.id = "markers"; svg.appendChild(g);
+}
+function boardXY(ev) {
+  const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY;
+  const q = p.matrixTransform(svg.getScreenCTM().inverse());
+  return { x: q.x, y: -q.y };  // SVG y is down, board y is up
+}
+// Local copy of the scoring rule, only for the hover preview.
+function label(x, y) {
+  const d = G.dims, r = Math.hypot(x, y);
+  if (r <= d.inner_bull) return "BULL"; if (r <= d.outer_bull) return "25"; if (r > d.double_outer) return "MISS";
+  const a = ((Math.atan2(x, y) * 180 / Math.PI) + 360 + 9) % 360, n = G.order[Math.floor(a / 18)];
+  if (r > d.triple_inner && r <= d.triple_outer) return "T" + n;
+  if (r > d.double_inner && r <= d.double_outer) return "D" + n;
+  return "S" + n;
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.error) { document.getElementById("msg").textContent = data.error; return; }
+  render(data);
+}
+
+function render(s) {
+  document.getElementById("title").textContent = s.game === "cricket" ? "Cricket" : s.game;
+  const sb = document.getElementById("scoreboard");
+  if (s.game === "cricket") {
+    const sym = m => ["", "/", "X", "Ⓧ"][m];
+    sb.innerHTML = `<table><tr><th>Player</th>${s.targets.map(t => `<th>${t}</th>`).join("")}<th>Pts</th></tr>` +
+      s.players.map((p, i) => `<tr class="${i === s.current ? "current" : ""}"><td>${esc(p)}</td>${s.marks[p].map(m => `<td>${sym(m)}</td>`).join("")}<td>${s.scores[p]}</td></tr>`).join("") + "</table>";
+  } else {
+    sb.innerHTML = `<table><tr><th>Player</th><th>Left</th><th>Avg</th></tr>` +
+      s.players.map((p, i) => `<tr class="${i === s.current ? "current" : ""}"><td>${esc(p)}</td><td class="big">${s.scores[p]}</td><td>${s.averages[p]}</td></tr>`).join("") + "</table>";
+  }
+  const darts = document.getElementById("darts"); darts.innerHTML = "";
+  for (let i = 0; i < 3; i++) {
+    const t = s.turn[i], el = document.createElement("div");
+    el.className = "dart" + (t ? " filled" : ""); el.textContent = t ? t.label : "–"; darts.appendChild(el);
+  }
+  const msg = document.getElementById("msg");
+  msg.textContent = s.winner ? `🏆 ${s.message}` : (s.message || (s.turn_over ? "Visit complete: remove darts" : `${s.players[s.current]} to throw`));
+  msg.className = "msg" + (s.message.startsWith("BUST") ? " bust" : "");
+  document.getElementById("checkout").textContent = s.checkout ? "Checkout: " + s.checkout.join(" · ") : "";
+  document.getElementById("feed").textContent = s.feed.slice().reverse().join("\n");
+  const g = document.getElementById("markers"); g.innerHTML = "";
+  s.markers.forEach(m => {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", m.x); c.setAttribute("cy", -m.y); c.setAttribute("r", 4);
+    c.setAttribute("fill", "#f5c542"); c.setAttribute("stroke", "#000"); c.setAttribute("stroke-width", 1.5);
+    g.appendChild(c);
+  });
+}
+function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+svg.addEventListener("click", ev => api("/api/impact", boardXY(ev)));
+svg.addEventListener("mousemove", ev => { const p = boardXY(ev); document.getElementById("hover").textContent = `${label(p.x, p.y)}   (x=${p.x.toFixed(1)} mm, y=${p.y.toFixed(1)} mm)`; });
+document.getElementById("undo").onclick = () => api("/api/undo", {});
+document.getElementById("next").onclick = () => api("/api/next", {});
+document.getElementById("manual").onsubmit = ev => { ev.preventDefault(); const f = ev.target; api("/api/throw", { label: f.label.value }); f.label.value = ""; };
+document.getElementById("newgame").onsubmit = ev => {
+  ev.preventDefault(); const f = ev.target;
+  api("/api/new", { game: f.game.value, players: f.players.value, double_out: f.double_out.checked });
+};
+
+(async () => {
+  G = await (await fetch("/api/geometry")).json();
+  drawBoard();
+  if (G.camera) document.getElementById("camera").hidden = false;
+  await api("/api/state");
+  setInterval(() => api("/api/state"), 700);
+})();
+</script>
+</body>
+</html>

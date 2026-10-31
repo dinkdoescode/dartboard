@@ -1,0 +1,21 @@
+[project]
+name = "dartscore"
+version = "0.1.0"
+description = "Automatic dartboard scoring: camera calibration, dart detection, scoring and games"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0", "opencv-python>=4.10", "scipy>=1.13", "flask>=3.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+dartscore = "dartscore.__main__:main"
+
+[tool.setuptools]
+packages = { find = { include = ["dartscore*"] } }
+
+[tool.setuptools.package-data]
+"dartscore.ui" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
